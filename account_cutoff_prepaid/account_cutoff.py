@@ -45,6 +45,8 @@ class account_cutoff(orm.Model):
         mapping = {
             'prepaid_expense': ('purchase', 'purchase_refund'),
             'prepaid_revenue': ('sale', 'sale_refund'),
+            'accrued_expense': ('purchase', 'purchase_refund'),
+            'accrued_revenue': ('sale', 'sale_refund'),
         }
         if type in mapping:
             src_journal_ids = journal_obj.search(
@@ -211,5 +213,5 @@ class account_cutoff_line(orm.Model):
         'end_date': fields.date('End Date', readonly=True),
         'total_days': fields.integer('Total Number of Days', readonly=True),
         'after_cutoff_days': fields.integer(
-            'Number of Days after Cut-off Date', readonly=True),
+            'Cut-off Days', readonly=True),
     }

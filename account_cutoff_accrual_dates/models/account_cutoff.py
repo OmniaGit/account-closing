@@ -1,15 +1,16 @@
 # -*- coding: utf-8 -*-
-# Copyright 2013-2018 Akretion France
+# Copyright 2013-2020 Akretion France
 # @author: Alexis de Lattre <alexis.delattre@akretion.com>
 # License AGPL-3.0 or later (http://www.gnu.org/licenses/agpl).
 
-from odoo import models, fields, _
-from odoo.exceptions import UserError
+from openerp import api, fields, models, _
+from openerp.exceptions import Warning as UserError
 
 
 class AccountCutoff(models.Model):
     _inherit = 'account.cutoff'
 
+    @api.multi
     def _prepare_accrual_date_lines(self, aml, mapping):
         self.ensure_one()
         start_date_dt = fields.Date.from_string(aml.start_date)
@@ -25,7 +26,7 @@ class AccountCutoff(models.Model):
             prepaid_days = (cutoff_date_dt - start_date_dt).days + 1
         assert total_days > 0,\
             'Should never happen. Total days should always be > 0'
-        cutoff_amount = - aml.balance * \
+        cutoff_amount = (aml.credit - aml.debit) * \
             prepaid_days / float(total_days)
         cutoff_amount = self.company_currency_id.round(cutoff_amount)
         # we use account mapping here
@@ -45,28 +46,29 @@ class AccountCutoff(models.Model):
             'cutoff_account_id': cutoff_account_id,
             'analytic_account_id': aml.analytic_account_id.id or False,
             'total_days': total_days,
-            'prepaid_days': prepaid_days,
-            'amount': - aml.balance,
+            'after_cutoff_days': prepaid_days,  # here, it is BEFORE cutoff days
+            'amount': aml.credit - aml.debit,
             'currency_id': self.company_currency_id.id,
             'cutoff_amount': cutoff_amount,
             }
 
-        if aml.tax_ids:
+        if aml.tax_code_id:
+            tax = self.env['account.tax'].search([('base_code_id', '=', aml.tax_code_id.id)], limit=1)
             # It won't work with price-included taxes
-            for tax in aml.tax_ids:
-                if tax.price_include:
-                    raise UserError(_(
-                        "Price included taxes such as '%s' are not "
-                        "supported by the module account_cutoff_accrual_dates "
-                        "for the moment.") % tax.display_name)
-            tax_compute_all_res = aml.tax_ids.compute_all(
-                cutoff_amount, product=aml.product_id, partner=aml.partner_id)
+            if tax.price_include:
+                 raise UserError(_(
+                    "Price included taxes such as '%s' are not "
+                    "supported by the module account_cutoff_accrual_dates "
+                    "for the moment.") % tax.display_name)
+            tax_compute_all_res = tax.compute_all(
+                cutoff_amount, 1, product=aml.product_id, partner=aml.partner_id)
             res['tax_line_ids'] = self._prepare_tax_lines(
                 tax_compute_all_res, self.company_currency_id)
         return res
 
-    def get_lines(self):
-        res = super(AccountCutoff, self).get_lines()
+    @api.multi
+    def generate_accrual_lines(self):
+        res = super(AccountCutoff, self).generate_accrual_lines()
         if self.type not in ['accrued_expense', 'accrued_revenue']:
             return res
         aml_obj = self.env['account.move.line']
